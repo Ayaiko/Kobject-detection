@@ -53,3 +53,6 @@ coverage.xml
 # pipenv, poetry, hatch
 Pipfile.lock
 poetry.lock
+
+# dataset
+augmented_images
