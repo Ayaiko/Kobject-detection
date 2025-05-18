@@ -56,8 +56,9 @@ def motion_blur(image, size=5):
 
 # Add Gaussian noise
 def add_gaussian_noise(image, stddev=0.1):
+    # Assume image is in [-1, 1] range
     noise = tf.random.normal(shape=tf.shape(image), mean=0.0, stddev=stddev, dtype=tf.float32)
-    return tf.clip_by_value(image + noise, 0.0, 1.0)
+    return tf.clip_by_value(image + noise, -1.0, 1.0)
 
 # Simulate distortion (using barrel or pincushion)
 def simulate_distortion(image, factor=0.2):
