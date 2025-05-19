@@ -1,73 +1,136 @@
 import tensorflow as tf
 from tensorflow.keras import layers, models
+import numpy as np
 import os
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 
+# Set parameters
+data_dir = 'augmented_images'
+img_height = 224
+img_width = 224
+batch_size = 32
+num_epochs = 3
 
-DATA_PATH = 'item_template_images'
-# Define image parameters
-IMG_HEIGHT = 720
-IMG_WIDTH = 720
-BATCH_SIZE = 8  # adjust based on GPU RAM
-NUM_CLASSES = len([d for d in os.listdir(DATA_PATH) if os.path.isdir(os.path.join(DATA_PATH, d))])
-
-# Load training and validation datasets
-train_ds = tf.keras.preprocessing.image_dataset_from_directory(
-    DATA_PATH,
-    image_size=(IMG_HEIGHT, IMG_WIDTH),
-    batch_size=BATCH_SIZE
+# Prepare the dataset
+dataset = tf.keras.utils.image_dataset_from_directory(
+    data_dir,
+    labels='inferred',
+    label_mode='categorical',
+    batch_size=batch_size,
+    image_size=(img_height, img_width),
+    shuffle=True,
+    seed=42
 )
 
-val_ds = tf.keras.preprocessing.image_dataset_from_directory(
-    DATA_PATH,
-    image_size=(IMG_HEIGHT, IMG_WIDTH),
-    batch_size=BATCH_SIZE
-)
+class_names = dataset.class_names
+num_classes = len(class_names)
 
+# Prefetch for performance
+dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
+
+# Split into train/val
+total_batches = tf.data.experimental.cardinality(dataset).numpy()
+val_batches = int(0.2 * total_batches)
+train_ds = dataset.skip(val_batches)
+val_ds = dataset.take(val_batches)
+
+# Data augmentation (optional, since you already augment offline)
 data_augmentation = tf.keras.Sequential([
-    layers.RandomFlip("horizontal_and_vertical"),  # flips along x and y axis
-    layers.RandomRotation(0.2),                    # rotation ~ z-axis (in-plane)
+    layers.RandomFlip('horizontal'),
+    layers.RandomRotation(0.1),
     layers.RandomZoom(0.1),
-    layers.RandomContrast(0.1)
 ])
 
+# Build the model with transfer learning
+base_model = tf.keras.applications.MobileNetV2(
+    input_shape=(img_height, img_width, 3),
+    include_top=False,
+    weights='imagenet',
+    pooling='avg'
+)
+base_model.trainable = False  # Freeze base model
 
-# Normalize pixel values to [0, 1]
-normalization_layer = layers.Rescaling(1./255)
-train_ds = train_ds.map(lambda x, y: (normalization_layer(data_augmentation(x, training=True)), y))
-val_ds = val_ds.map(lambda x, y: (normalization_layer(x), y))
+inputs = tf.keras.Input(shape=(img_height, img_width, 3))
+x = data_augmentation(inputs)
+x = tf.keras.layers.Rescaling(1./127.5, offset=-1)(x)
+x = base_model(x, training=False)
 
-# Prefetching for performance
-AUTOTUNE = tf.data.AUTOTUNE
-train_ds = train_ds.cache().shuffle(1000).prefetch(buffer_size=AUTOTUNE)
-val_ds = val_ds.cache().prefetch(buffer_size=AUTOTUNE)
+# Classification head
+class_output = layers.Dense(num_classes, activation='softmax', name='class_output')(x)
+# Orientation head (yaw, pitch, roll)
+orient_output = layers.Dense(3, activation='linear', name='orient_output')(x)
 
-# Build CNN model
-model = models.Sequential([
-    layers.Conv2D(32, (3, 3), activation='relu', input_shape=(IMG_HEIGHT, IMG_WIDTH, 3)),
-    layers.MaxPooling2D((2, 2)),
+model = models.Model(inputs=inputs, outputs=[class_output, orient_output])
 
-    layers.Conv2D(64, (3, 3), activation='relu'),
-    layers.MaxPooling2D((2, 2)),
-
-    layers.Conv2D(128, (3, 3), activation='relu'),
-    layers.MaxPooling2D((2, 2)),
-
-    layers.Flatten(),
-    layers.Dense(128, activation='relu'),
-    layers.Dropout(0.5),
-    layers.Dense(NUM_CLASSES, activation='softmax')
-])
-
-# Compile model
 model.compile(
     optimizer='adam',
-    loss='sparse_categorical_crossentropy',
-    metrics=['accuracy']
+    loss={
+        'class_output': 'categorical_crossentropy',
+        'orient_output': 'mse'
+    },
+    metrics={'class_output': 'accuracy'}
 )
 
-# Train model
+# Dummy orientation labels (replace with real orientation data if available)
+def add_dummy_orientation(ds):
+    def add_orientation(image, label):
+        # Replace np.zeros(3) with your real orientation data
+        orientation = tf.zeros((3,), dtype=tf.float32)
+        return image, {'class_output': label, 'orient_output': orientation}
+    return ds.map(add_orientation, num_parallel_calls=tf.data.AUTOTUNE)
+
+train_ds = add_dummy_orientation(train_ds)
+val_ds = add_dummy_orientation(val_ds)
+
+# Callbacks for saving and early stopping
+checkpoint_cb = ModelCheckpoint(
+    'kibo_mobilenetv2_multitask_best.h5',
+    monitor='val_class_output_accuracy',
+    save_best_only=True,
+    save_weights_only=False,
+    mode='max',
+    verbose=1
+)
+earlystop_cb = EarlyStopping(
+    monitor='val_class_output_accuracy',
+    patience=5,
+    mode='max',
+    restore_best_weights=True,
+    verbose=1
+)
+
+# Train the model with callbacks
 history = model.fit(
     train_ds,
     validation_data=val_ds,
-    epochs=10  # increase for better performance
+    epochs=num_epochs,
+    callbacks=[checkpoint_cb, earlystop_cb]
 )
+
+# Optionally, unfreeze and fine-tune
+base_model.trainable = True
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(1e-5),
+    loss={
+        'class_output': 'categorical_crossentropy',
+        'orient_output': 'mse'
+    },
+    metrics={'class_output': 'accuracy'}
+)
+model.fit(
+    train_ds,
+    validation_data=val_ds,
+    epochs=2,
+    callbacks=[checkpoint_cb, earlystop_cb]
+)
+
+# Save the model
+model.save('kibo_mobilenetv2_multitask.h5')
+
+# Convert to TensorFlow Lite
+converter = tf.lite.TFLiteConverter.from_keras_model(model)
+tflite_model = converter.convert()
+with open('kibo_mobilenetv2_multitask.tflite', 'wb') as f:
+    f.write(tflite_model)
+
+print('Training and export complete!')

@@ -1,0 +1,39 @@
+---
+applyTo: '**'
+---
+
+# Coding Standards
+
+- Use Python 3.10+ syntax.
+- Follow PEP8 for formatting.
+- Use Black for code formatting.
+- Prefer list comprehensions over map/filter.
+- Use type hints for all functions.
+
+# Naming Conventions
+
+- Use snake_case for variables and functions.
+- Use PascalCase for classes.
+
+# Domain Knowledge
+
+- This project is for object detection and classification (Kibo-RPC context).
+- Use TensorFlow and Keras for ML tasks.
+- Data augmentation should use TensorFlow ops.
+
+# Project Preferences
+
+- All scripts should be compatible with Windows and PowerShell.
+- Ignore files in `env/` and `__pycache__/`.
+- Focus on `augmentation/`, `apply_augment.py`, and `main.py` for core logic.
+
+
+
+# Example
+
+```python
+def preprocess_image(image: tf.Tensor) -> tf.Tensor:
+    # ...existing code...
+    return image
+
+```
