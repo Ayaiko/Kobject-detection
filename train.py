@@ -27,8 +27,8 @@ model, base_model = build_mobilenetv2_multitask(IMG_HEIGHT, IMG_WIDTH, num_class
 model.compile(
     optimizer='adam',
     loss={
-        'class_output': 'categorical_crossentropy',
-        'orient_output': 'mse'
+        'class_output': tf.keras.losses.CategoricalCrossentropy(),
+        'orient_output': tf.keras.losses.MeanSquaredError()
     },
     metrics={'class_output': 'accuracy'}
 )
@@ -61,8 +61,8 @@ base_model.trainable = True
 model.compile(
     optimizer=tf.keras.optimizers.Adam(1e-5),
     loss={
-        'class_output': 'categorical_crossentropy',
-        'orient_output': 'mse'
+        'class_output': tf.keras.losses.CategoricalCrossentropy(),
+        'orient_output': tf.keras.losses.MeanSquaredError()
     },
     metrics={'class_output': 'accuracy'}
 )

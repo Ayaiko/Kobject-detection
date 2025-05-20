@@ -1,9 +1,8 @@
 import tensorflow as tf
 import numpy as np
 from tensorflow.keras.preprocessing import image
-from PIL import Image
-from tensorflow.keras.utils import get_custom_objects
 import os
+from PIL import Image
 
 # Parameters
 IMG_HEIGHT = 224
@@ -13,6 +12,8 @@ H5_MODEL_PATH = 'kibo_mobilenetv2_multitask.h5'
 TFLITE_MODEL_PATH = 'kibo_mobilenetv2_multitask.tflite'
 
 def load_and_preprocess_image(image_path):
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Image not found: {image_path}")
     img = Image.open(image_path).convert('RGB')
     img = img.resize((IMG_WIDTH, IMG_HEIGHT))
     img = np.array(img, dtype=np.float32)
@@ -24,17 +25,21 @@ def load_and_preprocess_image(image_path):
 class_names = sorted([d for d in os.listdir('augmented_images') if os.path.isdir(os.path.join('augmented_images', d))])
 
 # Use a real image from item_template for testing
-test_img = load_and_preprocess_image('item_template/coin.png')
+try:
+    test_img = load_and_preprocess_image('item_template/coin.png')
+except FileNotFoundError as e:
+    print(e)
+    exit(1)
 
 print('Testing Keras .h5 model...')
-# Register a dummy 'TrueDivide' workaround for loading the model
-get_custom_objects()['TrueDivide'] = tf.keras.layers.Lambda(lambda x: x / 255.0)
-
 # Load and test the Keras model
 keras_model = tf.keras.models.load_model(H5_MODEL_PATH, compile=False)
 class_pred, orient_pred = keras_model.predict(test_img)
+keras_class_idx = np.argmax(class_pred)
+keras_class_name = class_names[keras_class_idx] if keras_class_idx < len(class_names) else 'Unknown'
 print('Keras model outputs:')
 print('  Class probabilities:', class_pred)
+print(f'  Predicted class: {keras_class_name} (index {keras_class_idx})')
 print('  Orientation (yaw, pitch, roll):', orient_pred)
 
 print('\nTesting TFLite model...')
@@ -57,9 +62,11 @@ if out0.shape[1] == class_pred.shape[1]:
 else:
     class_pred_tflite = out1
     orient_pred_tflite = out0
-
+tflite_class_idx = np.argmax(class_pred_tflite)
+tflite_class_name = class_names[tflite_class_idx] if tflite_class_idx < len(class_names) else 'Unknown'
 print('TFLite model outputs:')
 print('  Class probabilities:', class_pred_tflite)
+print(f'  Predicted class: {tflite_class_name} (index {tflite_class_idx})')
 print('  Orientation (yaw, pitch, roll):', orient_pred_tflite)
 
 # Check output shapes
@@ -78,7 +85,11 @@ def evaluate_on_directory(directory):
     total = 0
     for fname in image_files:
         img_path = os.path.join(directory, fname)
-        img = load_and_preprocess_image(img_path)
+        try:
+            img = load_and_preprocess_image(img_path)
+        except FileNotFoundError:
+            print(f"Warning: {img_path} not found, skipping.")
+            continue
         # Keras prediction
         k_pred, _ = keras_model.predict(img)
         keras_class = np.argmax(k_pred)
