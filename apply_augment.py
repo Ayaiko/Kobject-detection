@@ -42,7 +42,7 @@ def preprocess_and_save(image_path, output_path):
 
 image_folder = 'item_template'
 output_folder = 'augmented_images'
-num_augmented = 100  # Number of augmented images per original
+num_augmented = 10  # Number of augmented images per original
 
 for image_name in os.listdir(image_folder):
     image_path = os.path.join(image_folder, image_name)
