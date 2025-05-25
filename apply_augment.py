@@ -1,48 +1,37 @@
 import os
-from augmentation.data_augmentation import *
-import tensorflow as tf
+import numpy as np
+import imageio.v3 as iio
+import imgaug.augmenters as iaa
 
-# Configurable probabilities for each augmentation
-AUGMENT_PROBS = {
-    'random_rotation': 0.5,
-    'random_scaling_and_cropping': 0.5,
-    'random_brightness_and_contrast': 0.5,
-    'random_color_jitter': 0.5,
-    'motion_blur': 0.5,
-    'simulate_distortion': 0.5,
-    'add_gaussian_noise': 0.5,
-}
+# Define augmentation pipeline using imgaug
+AUGMENT_PIPELINE = iaa.Sequential([
+    iaa.Sometimes(0.5, iaa.Affine(rotate=(-30, 30))),
+    iaa.Sometimes(0.5, iaa.Affine(scale=(0.8, 1.2), translate_percent=(-0.1, 0.1))),
+    iaa.Sometimes(0.5, iaa.AddToBrightness((-30, 30))),
+    iaa.Sometimes(0.5, iaa.AddToHueAndSaturation((-20, 20))),
+    iaa.Sometimes(0.5, iaa.MotionBlur(k=3)),
+    iaa.Sometimes(0.5, iaa.PiecewiseAffine(scale=(0.01, 0.03))),
+    iaa.Sometimes(0.5, iaa.AdditiveGaussianNoise(scale=(0, 0.05*255))),
+])
 
 def preprocess_and_save(image_path, output_path):
-    # Load image
-    image = tf.io.read_file(image_path)
-    image = tf.image.decode_png(image, channels=3)  # Assuming PNG, RGB
-
-    # Apply the preprocessing steps with configurable probabilities
-    image = resize_image(image)
-    # image = convert_to_rgb(image)
-    if tf.random.uniform([]) < AUGMENT_PROBS['random_rotation']:
-        image = random_rotation(image)
-    if tf.random.uniform([]) < AUGMENT_PROBS['random_scaling_and_cropping']:
-        image = random_scaling_and_cropping(image)
-    if tf.random.uniform([]) < AUGMENT_PROBS['random_brightness_and_contrast']:
-        image = random_brightness_and_contrast(image)
-    if tf.random.uniform([]) < AUGMENT_PROBS['random_color_jitter']:
-        image = random_color_jitter(image)
-    if tf.random.uniform([]) < AUGMENT_PROBS['motion_blur']:
-        image = motion_blur(image)
-    if tf.random.uniform([]) < AUGMENT_PROBS['simulate_distortion']:
-        image = simulate_distortion(image)
-    image = normalize(image)
-    if tf.random.uniform([]) < AUGMENT_PROBS['add_gaussian_noise']:
-        image = add_gaussian_noise(image)
-
+    # Load image as numpy array
+    image = iio.imread(image_path)
+    # Ensure image is uint8 and 3 channels
+    if image.dtype != np.uint8:
+        image = (image * 255).astype(np.uint8)
+    if image.ndim == 2 or image.shape[-1] == 1:
+        image = np.stack([image.squeeze()] * 3, axis=-1)
+    # Resize to 224x224 (if needed)
+    image = iaa.Resize((224, 224))(image=image)
+    # Apply augmentations
+    aug_image = AUGMENT_PIPELINE(image=image)
     # Save the processed image
-    tf.io.write_file(output_path, tf.image.encode_png(tf.cast((image + 1) * 127.5, tf.uint8)))  # Denormalize and save as PNG
+    iio.imwrite(output_path, aug_image)
 
 image_folder = 'item_template'
 output_folder = 'augmented_images'
-num_augmented = 100  # Number of augmented images per original
+num_augmented = 1000  # Number of augmented images per original
 
 for image_name in os.listdir(image_folder):
     image_path = os.path.join(image_folder, image_name)
