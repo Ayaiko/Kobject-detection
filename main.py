@@ -5,5 +5,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 if __name__ == '__main__':
+    import apply_augment
     import train
     import export
+    import test_model
